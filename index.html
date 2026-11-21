@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com; img-src 'self' blob: data:; frame-src https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1f2226" media="(prefers-color-scheme: dark)">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="remini shows your own photos and videos from your Google Drive. It only reads; it can't change or delete anything.">
+  <title>remini</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body class="signed-out">
+  <header class="topbar" id="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/library">remini</a>
+      <nav class="nav" id="nav" aria-label="Main">
+        <a href="#/library" data-page="library">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+            <rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/>
+            <rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>
+          </svg>
+          <span>Library</span>
+        </a>
+        <a href="#/timeline" data-page="timeline">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>
+          </svg>
+          <span>Timeline</span>
+        </a>
+        <a href="#/accounts" data-page="accounts">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+            <path d="M7 19h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.3 9.6 4.75 4.75 0 0 0 7 19z"/>
+          </svg>
+          <span>Accounts</span>
+        </a>
+      </nav>
+      <form class="search" id="search-form" role="search">
+        <label for="search-input" class="visually-hidden">Search your photos and videos</label>
+        <input id="search-input" type="search" autocomplete="off" enterkeyhint="search"
+               placeholder="Search your photos">
+        <button type="submit">Search</button>
+      </form>
+    </div>
+    <div class="topbar-inner">
+      <p class="summary" id="summary" aria-live="polite"></p>
+    </div>
+  </header>
+
+  <div class="banners" id="banners" aria-live="polite"></div>
+
+  <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+    <h1 id="welcome-title">remini</h1>
+    <div class="welcome-about">
+      <h2>What is remini?</h2>
+      <p>remini shows your own photos and videos, kept safe in your Google Drive, on your phone, even when your computer is off.</p>
+      <p>There are no "memories", no ranking and no feeds. Just your photos, newest first, with a timeline and a search. You decide how things are grouped.</p>
+    </div>
+    <div class="card signin-card">
+      <h2>Sign in</h2>
+      <p id="signin-text">Sign in with your home Google account to see your photos. remini only reads; it can't change or delete anything.</p>
+      <p><button type="button" class="primary big" id="signin-btn" disabled>Sign in with Google</button></p>
+      <p class="small" id="signin-status" aria-live="polite"></p>
+      <p class="small muted">Your photos go straight from Google to this phone. Nothing is sent anywhere else.</p>
+    </div>
+    <p class="small"><a href="privacy.html">Privacy</a> · <a href="?demo=1" id="demo-link">See a demo with made-up photos</a></p>
+  </section>
+
+  <main class="view" id="view" tabindex="-1" hidden>
+    <noscript><p>remini needs JavaScript turned on in your browser.</p></noscript>
+  </main>
+
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="Photo" hidden></div>
+</body>
+</html>

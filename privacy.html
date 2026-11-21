@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com; img-src 'self' blob: data:; frame-src https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>remini: privacy</title>
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="plain-page">
+  <header class="topbar">
+    <div class="topbar-inner"><a class="brand" href="./">remini</a></div>
+    <div class="topbar-inner"><p class="summary"></p></div>
+  </header>
+  <main class="view">
+    <article class="intro">
+      <h1>Privacy</h1>
+      <p class="muted">Last updated 21 November 2026</p>
+
+      <h2>In short</h2>
+      <ul>
+        <li>remini runs entirely in your browser, on your phone or computer.</li>
+        <li>It reads your Google Drive (read-only) only to show you your own photos and videos.</li>
+        <li>Nothing is sent to any server other than Google.</li>
+        <li>There are no analytics, no ads and no tracking. There are no cookies, apart from the ones Google uses for signing in.</li>
+      </ul>
+
+      <h2>What remini reads</h2>
+      <p>When you sign in with Google, you give remini permission to <strong>read</strong> files in your Google Drive. remini uses this only to find your photo list (a file called remini-catalog.json) and to show the photos, small previews and videos it lists.</p>
+      <p>remini can't change, move, share or delete anything in your Google Drive.</p>
+
+      <h2>What stays on your device</h2>
+      <p>To open quickly, remini keeps your photo list and small previews of your photos in your browser's storage on this device. They never leave the device. Full-size photos are not kept.</p>
+      <p>Your sign-in with Google is kept only while the page is open. It is never saved.</p>
+      <p>To remove everything remini saved, open <strong>Accounts</strong> and tap <strong>Sign out and forget this phone</strong>. Clearing your browser's data for this site does the same.</p>
+
+      <h2>Who else sees your photos</h2>
+      <p>No one. The photos go directly from Google to your browser. remini has no server of its own, and the people who made it can't see your photos or your photo list.</p>
+
+      <h2>Taking back permission</h2>
+      <p>You can take back remini's permission at any time in your Google Account, under Security, then "Your connections to third-party apps and services".</p>
+
+      <h2>Contact</h2>
+      <p>Questions? Get in touch through the GitHub profile: <a href="https://github.com/angelina-ong" rel="noopener noreferrer">github.com/angelina-ong</a>.</p>
+
+      <p class="footnote"><a href="./">Back to remini</a></p>
+    </article>
+  </main>
+</body>
+</html>
