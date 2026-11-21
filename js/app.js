@@ -9,9 +9,9 @@ import { createThumbLoader } from './thumbs.js';
 const DEMO = new URLSearchParams(location.search).get('demo') === '1';
 const DEMO_MANY = DEMO && new URLSearchParams(location.search).get('many') === '1';
 const BASE = new URL('./', document.baseURI).href; // .../remini/
+const REDIRECT_URI = `${location.origin}/remini/`; // must match the OAuth client's allowed redirect exactly
 const CATALOG_KEY = 'remini:catalog';
 const META_KEY = 'remini:catalogMeta';
-const LS_SIGNED_IN = 'remini:signedInBefore';
 const enc = encodeURIComponent;
 
 const $ = id => document.getElementById(id);
@@ -26,7 +26,7 @@ const state = {
   list: null,         // items the photo view swipes through
   viewer: { open: false, id: null, token: 0, chrome: null, ctrl: null, canGoBack: false, thumbHandle: null, fullUrl: null },
   filtersOpen: false,
-  refreshing: false, refreshNote: '', problem: null, stale: false,
+  refreshing: false, problem: null, stale: false,
 };
 
 let store, api, auth, thumbs;
@@ -47,8 +47,6 @@ function el(tag, props, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid);
   return n;
 }
-const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
 const loadingEl = () => el('p', { class: 'muted loading', text: 'Loading…' });
 function section(title, ...content) {
   return el('section', { class: 'v-sec' }, el('h3', { text: title }), ...content);
@@ -71,16 +69,14 @@ function drawBanners() {
   }
   if (!DEMO && state.cat) {
     const st = auth.status;
-    if (st === 'expired' || st === 'signed-out' || st === 'loading') {
-      const msg = st === 'loading' ? 'Getting ready…'
-        : state.refreshNote === 'never' ? 'Tap to continue, and remini will load your newest photos.'
-          : 'Google asks remini to check in now and then. Tap to continue to see the newest photos.';
-      const btn = el('button', { type: 'button', class: 'primary', text: 'Tap to continue', disabled: st === 'loading',
-        onclick: () => { if (!auth.request()) toast('Just a moment, and then try again.'); } });
+    if (st === 'expired' || st === 'signed-out') {
+      const msg = 'Google asks remini to check in now and then. Tap to continue to see the newest photos.';
+      const btn = el('button', { type: 'button', class: 'primary', text: 'Tap to continue',
+        onclick: () => { if (!auth.request()) toast('Signing in isn’t possible right now.'); } });
       out.push(el('div', { class: 'banner', id: 'continue-banner' }, el('p', { text: msg }), btn));
     }
-    if (auth.error === 'closed' || auth.error === 'failed' || auth.error === 'refused') {
-      out.push(el('div', { class: 'banner banner-error' },
+    if (auth.error === 'failed' || auth.error === 'refused' || auth.error === 'state') {
+      out.push(el('div', { class: 'banner banner-error', id: 'auth-error' },
         el('p', { text: auth.error === 'refused' ? "Google didn't give permission. Please tap again and choose Allow."
           : "That didn't finish. Please tap “Tap to continue” again." })));
     }
@@ -122,14 +118,12 @@ function showWelcome(on) {
 
 function drawSignin() {
   const btn = $('signin-btn'), status = $('signin-status');
-  const st = auth ? auth.status : 'loading';
-  btn.disabled = st === 'loading' || st === 'unavailable';
-  btn.textContent = st === 'loading' ? 'Getting ready…' : 'Sign in with Google';
+  const st = auth ? auth.status : 'signed-out';
+  btn.disabled = !auth || st === 'unavailable';
+  btn.textContent = 'Sign in with Google';
   const why = auth && auth.error;
-  status.textContent = st === 'unavailable'
-    ? (why === 'no-client-id' ? "remini isn't set up yet, so signing in isn't possible."
-      : "Google's sign-in couldn't be reached. Please check your internet connection and reload the page.")
-    : why === 'closed' ? 'The Google window was closed before you finished. Please tap Sign in again.'
+  status.textContent = st === 'unavailable' ? "remini isn't set up yet, so signing in isn't possible."
+    : why === 'state' ? "Signing in didn't finish properly. Please tap Sign in again."
       : why === 'refused' ? "Google didn't give permission. Please tap Sign in again and choose Allow."
         : why === 'scope' ? 'Please tap Sign in again and tick the box that lets remini see your Drive files.'
           : why === 'failed' ? "That didn't work. Please tap Sign in again." : '';
@@ -145,7 +139,7 @@ async function loadCached() {
 function useCatalog(raw, meta) {
   state.cat = L.prepareCatalog(raw);
   state.meta = meta || null;
-  if (auth && state.cat.home && state.cat.home.includes('@')) auth.setHint(state.cat.home);
+  if (auth && state.cat.home) auth.rememberEmail(state.cat.home); // a hint for Google next time
 }
 
 async function refreshCatalog() {
@@ -161,10 +155,8 @@ async function refreshCatalog() {
     const raw = await api.downloadCatalog(meta.id);
     const first = !state.cat;
     useCatalog(raw, meta);
-    lsSet(LS_SIGNED_IN, '1');
     store.kvSet(CATALOG_KEY, raw).then(() => store.kvSet(META_KEY, meta)).catch(() => {});
     setProblem(null);
-    state.refreshNote = 'done';
     if (first) { showWelcome(false); refreshSummary(); onRoute(); } else redrawKeepingScroll();
   } catch (e) {
     if (e instanceof AuthNeeded) { drawBanners(); return; }
@@ -685,7 +677,6 @@ function aboutCard() {
     box.append(el('button', { type: 'button', text: 'Sign out and forget this phone', onclick: async () => {
       if (!confirm('Sign out? remini will forget the photo list and thumbnails it saved on this phone. Nothing in your Google Drive changes.')) return;
       auth.signOut();
-      try { localStorage.removeItem(LS_SIGNED_IN); } catch (e) { /* ignore */ }
       await store.clearAll();
       location.replace('./');
     } }));
@@ -753,6 +744,7 @@ function onKey(e) {
 
 // ---------- start ----------
 function onAuthChange(status) {
+  if (!thumbs) return; // still starting: start() takes it from here
   if (status === 'ok') {
     thumbs.resume();
     refreshCatalog();
@@ -775,31 +767,32 @@ async function start() {
   document.addEventListener('keydown', onKey);
   window.addEventListener('hashchange', onRoute);
 
-  store = await openStore(DEMO_MANY ? 'remini:demo-many' : DEMO ? 'remini:demo' : 'remini:cache', THUMB_CACHE_BYTES);
   if (DEMO) {
-    auth = { status: 'ok', error: null, request: () => false, setHint() {}, signOut() {} };
+    auth = { status: 'ok', error: null, returned: false, request: () => false, trySilent: () => false, rememberEmail() {}, signOut() {} };
     api = demoApi(BASE, DEMO_MANY);
   } else {
-    auth = createAuth({ clientId: CLIENT_ID, scope: SCOPE, onChange: s => onAuthChange(s) });
+    // First of all: if Google just sent us back, take the token out of the address and restore the screen.
+    auth = createAuth({ clientId: CLIENT_ID, scope: SCOPE, redirectUri: REDIRECT_URI, onChange: s => onAuthChange(s) });
+    auth.init();
     api = driveApi(auth, CATALOG_NAME);
   }
+  store = await openStore(DEMO_MANY ? 'remini:demo-many' : DEMO ? 'remini:demo' : 'remini:cache', THUMB_CACHE_BYTES);
   thumbs = createThumbLoader({ api, store, max: 6 });
   if (DEMO) window.__reminiThumbStats = thumbs.stats; // for the automated checks
 
   const hadCache = await loadCached();
   if (hadCache) {
-    if (!DEMO) { auth.markReturning && auth.markReturning(); state.refreshNote = 'later'; }
     showWelcome(false);
     refreshSummary();
     onRoute();
   } else {
     showWelcome(!DEMO);
-    if (!DEMO && lsGet(LS_SIGNED_IN) === '1') state.refreshNote = 'never';
   }
   drawSignin();
   drawBanners();
   if (DEMO) await refreshCatalog();
-  else auth.init();
+  else if (auth.status === 'ok') refreshCatalog();
+  else if (auth.trySilent()) return; // on the way to Google for a quiet check; it comes straight back
   if (DEMO && !state.cat) showWelcome(false);
   document.documentElement.dataset.ready = '1';
 }

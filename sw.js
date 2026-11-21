@@ -1,9 +1,9 @@
 /* remini cloud service worker. It keeps ONLY the app's own files (the "app shell") so the home-screen
  * app opens quickly. Network first, so updates always show up when online.
- * It never touches Google (googleapis, accounts) answers, photos, thumbnails or blob: URLs:
+ * It never touches Google answers (Drive files, sign-in), photos, thumbnails or blob: URLs:
  * anything that isn't one of the files listed below goes straight to the network as usual. */
 'use strict';
-const CACHE = 'remini:shell-v1'; // Cache Storage is shared with other github.io pages: keep the prefix
+const CACHE = 'remini:shell-v2'; // Cache Storage is shared with other github.io pages: keep the prefix
 const SHELL = [
   './',
   'privacy.html',
@@ -44,6 +44,9 @@ function shellKey(request) {
   if (url.origin !== self.location.origin || !url.href.startsWith(SCOPE)) return null;
   const bare = url.origin + url.pathname;
   if (request.mode === 'navigate') {
+    // Google's sign-in answer comes back in the #part, which never reaches here; still, never keep
+    // anything whose address mentions a token or code.
+    if (/(token|code|state)=/i.test(url.search)) return null;
     return bare === INDEX || bare === `${INDEX}index.html` ? INDEX : null;
   }
   if (url.search) return null;

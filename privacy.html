@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com; img-src 'self' blob: data:; frame-src https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>remini: privacy</title>
@@ -17,7 +17,7 @@
   <main class="view">
     <article class="intro">
       <h1>Privacy</h1>
-      <p class="muted">Last updated 21 November 2026</p>
+      <p class="muted">Last updated 21 November 2026 (sign-in now uses a normal Google page instead of a pop-up window)</p>
 
       <h2>In short</h2>
       <ul>
@@ -33,7 +33,8 @@
 
       <h2>What stays on your device</h2>
       <p>To open quickly, remini keeps your photo list and small previews of your photos in your browser's storage on this device. They never leave the device. Full-size photos are not kept.</p>
-      <p>Your sign-in with Google is kept only while the page is open. It is never saved.</p>
+      <p>When you sign in, Google gives remini a pass (an "access token") that lets it read your Drive for about an hour. remini keeps this pass only for the current browser session: it is cleared when you close the tab or the app, and it stops working within an hour anyway. It is never sent anywhere except to Google.</p>
+      <p>remini also remembers which Google account you used last on this device, so Google can suggest it the next time you sign in.</p>
       <p>To remove everything remini saved, open <strong>Accounts</strong> and tap <strong>Sign out and forget this phone</strong>. Clearing your browser's data for this site does the same.</p>
 
       <h2>Who else sees your photos</h2>

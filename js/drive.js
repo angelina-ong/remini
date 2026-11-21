@@ -1,10 +1,24 @@
-/* remini cloud: Google sign-in (Google Identity Services, token model) and read-only Drive calls.
- * The access token lives only in memory, never in storage. It lasts about an hour; after that, or after
- * any 401, the app shows "Tap to continue", and only that tap opens Google's window. */
+/* remini cloud: Google sign-in and read-only Drive calls.
+ * Sign-in uses Google's OAuth 2.0 "implicit grant" with a full-page redirect (no pop-up windows, no
+ * Google script on the page): the page goes to Google, and Google sends it back to /remini/ with a
+ * short-lived access token in the address (#access_token=...). The token is then kept only in
+ * sessionStorage (this browser tab/app session), removed from the address straight away, and expires
+ * within about an hour. When it runs out, remini first asks Google quietly (prompt=none); if Google
+ * needs the user, a "Tap to continue" button does the normal sign-in. */
 
-const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const API = 'https://www.googleapis.com/drive/v3/files';
-const EARLY_MS = 60 * 1000; // treat the token as expired a minute early
+export const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
+const EARLY_MS = 60 * 1000;          // treat the token as expired a minute early
+const SILENT_GAP_MS = 2 * 60 * 1000; // never try the quiet sign-in more than once every 2 minutes
+export const KEYS = {
+  token: 'remini:token',             // sessionStorage: { t, exp }
+  state: 'remini:oauth_state',       // sessionStorage: the random value we expect back
+  silent: 'remini:oauth_silent',     // sessionStorage: { at } of the last quiet attempt
+  view: 'remini:return_view',        // sessionStorage: the screen to come back to (#/library?..., #/photo/id)
+  email: 'remini:last_email',        // localStorage: the account last used on this device (a hint for Google)
+};
+const SILENT_ERRORS = new Set(['interaction_required', 'login_required', 'consent_required', 'account_selection_required']);
 
 export class AuthNeeded extends Error {
   constructor() { super('Sign-in needed'); this.name = 'AuthNeeded'; }
@@ -18,95 +32,174 @@ export class Offline extends Error {
 
 export const clientIdLooksSet = id => typeof id === 'string' && /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(id);
 
-/** status: 'loading' (Google's sign-in code not ready) | 'signed-out' | 'ok' | 'expired' | 'unavailable' */
-export function createAuth({ clientId, scope, onChange }) {
-  const s = { status: 'loading', token: null, expiresAt: 0, client: null, timer: null, error: null, hint: '' };
+/** The address of Google's sign-in page. prompt: '' (normal), 'none' (quiet) or 'select_account'. */
+export function buildAuthUrl({ clientId, redirectUri, scope, state, loginHint, prompt }) {
+  const p = new URLSearchParams({
+    client_id: clientId, redirect_uri: redirectUri, response_type: 'token', scope,
+    include_granted_scopes: 'true', state,
+  });
+  if (loginHint) p.set('login_hint', loginHint);
+  if (prompt) p.set('prompt', prompt);
+  return `${AUTH_URL}?${p}`;
+}
+
+/** What Google put after the # when it sent the page back, or null if it is an ordinary address. */
+export function parseRedirect(hash) {
+  const raw = String(hash || '').replace(/^#/, '');
+  if (!/(^|&)(access_token|error)=/.test(raw)) return null;
+  const p = new URLSearchParams(raw);
+  return {
+    token: p.get('access_token'), expiresIn: Number(p.get('expires_in')) || 0, state: p.get('state') || '',
+    scope: p.get('scope') || '', error: p.get('error'),
+  };
+}
+
+function randomState() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function windowEnv() {
+  const safe = (store, fn) => { try { return fn(store()); } catch (e) { return null; } };
+  const ss = () => window.sessionStorage, ls = () => window.localStorage;
+  return {
+    hash: () => location.hash,
+    base: () => location.pathname + location.search,
+    replaceHash: h => history.replaceState(history.state, '', location.pathname + location.search + (h || '')),
+    go: url => location.assign(url),
+    sGet: k => safe(ss, s => s.getItem(k)), sSet: (k, v) => safe(ss, s => s.setItem(k, v)), sDel: k => safe(ss, s => s.removeItem(k)),
+    lGet: k => safe(ls, s => s.getItem(k)), lSet: (k, v) => safe(ls, s => s.setItem(k, v)), lDel: k => safe(ls, s => s.removeItem(k)),
+    now: () => Date.now(),
+    online: () => navigator.onLine !== false,
+    revoke: t => fetch(REVOKE_URL, { method: 'POST', mode: 'no-cors', credentials: 'omit',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `token=${encodeURIComponent(t)}` }).catch(() => {}),
+  };
+}
+
+/**
+ * status: 'signed-out' (never signed in here) | 'ok' | 'expired' (needs "Tap to continue") | 'unavailable'
+ * error:  null | 'refused' | 'failed' | 'state' | 'scope' | 'no-client-id'
+ */
+export function createAuth({ clientId, scope, redirectUri, onChange, env = windowEnv() }) {
+  const s = { status: 'signed-out', token: null, expiresAt: 0, timer: null, error: null, returned: false };
   const emit = () => { try { onChange(s.status, s.error); } catch (e) { /* ignore */ } };
   const set = (status, error = null) => { s.status = status; s.error = error; emit(); };
+  const known = () => !!env.lGet(KEYS.email);
 
-  function onToken(resp) {
-    if (!resp || resp.error || !resp.access_token) {
-      set(s.token ? 'ok' : (s.hadToken ? 'expired' : 'signed-out'), resp && resp.error ? 'refused' : 'failed');
-      return;
-    }
-    const g = window.google && window.google.accounts && window.google.accounts.oauth2;
-    if (g && g.hasGrantedAllScopes && !g.hasGrantedAllScopes(resp, scope)) {
-      set(s.hadToken ? 'expired' : 'signed-out', 'scope');
-      return;
-    }
-    s.token = resp.access_token;
-    s.hadToken = true;
-    s.expiresAt = Date.now() + Math.max(60, Number(resp.expires_in) || 3600) * 1000 - EARLY_MS;
+  function keep(token, expiresAt) {
+    s.token = token;
+    s.expiresAt = expiresAt;
+    env.sSet(KEYS.token, JSON.stringify({ t: token, exp: expiresAt }));
     clearTimeout(s.timer);
-    s.timer = setTimeout(expire, Math.max(1000, s.expiresAt - Date.now()));
-    set('ok');
+    s.timer = setTimeout(expire, Math.max(1000, Math.min(expiresAt - env.now(), 2 ** 31 - 1)));
   }
-  function onError(err) { // the window was closed, or a popup blocker stepped in
-    const type = err && err.type;
-    set(s.token ? 'ok' : (s.hadToken ? 'expired' : 'signed-out'), type === 'popup_closed' ? 'closed' : 'failed');
+  function drop() {
+    s.token = null;
+    s.expiresAt = 0;
+    clearTimeout(s.timer);
+    env.sDel(KEYS.token);
   }
   function expire() {
     if (!s.token) return;
-    s.token = null;
+    drop();
     set('expired');
+  }
+
+  /** Reads Google's answer if the page just came back from sign-in, then removes it from the address. */
+  function readRedirect() {
+    const r = parseRedirect(env.hash());
+    if (!r) return false;
+    const expected = env.sGet(KEYS.state);
+    const view = env.sGet(KEYS.view) || '';
+    const silent = (() => { try { return JSON.parse(env.sGet(KEYS.silent) || 'null'); } catch (e) { return null; } })();
+    env.sDel(KEYS.state);
+    env.sDel(KEYS.view);
+    env.replaceHash(/^#\//.test(view) ? view : '#/library'); // the token never stays in the address bar
+    s.returned = true;
+    if (!expected || r.state !== expected) { s.error = 'state'; return true; }
+    if (r.error) {
+      if (silent && SILENT_ERRORS.has(r.error)) s.error = null;      // Google needs the user: show "Tap to continue"
+      else s.error = r.error === 'access_denied' ? 'refused' : 'failed';
+      return true;
+    }
+    if (!r.token) { s.error = 'failed'; return true; }
+    if (r.scope && !r.scope.split(/\s+/).includes(scope)) { s.error = 'scope'; return true; }
+    env.sDel(KEYS.silent);
+    keep(r.token, env.now() + Math.max(60, r.expiresIn || 3600) * 1000 - EARLY_MS);
+    return true;
   }
 
   function init() {
     if (!clientIdLooksSet(clientId)) { set('unavailable', 'no-client-id'); return; }
-    const ready = () => {
+    readRedirect();
+    if (!s.token) {
       try {
-        s.client = window.google.accounts.oauth2.initTokenClient({
-          client_id: clientId, scope, callback: onToken, error_callback: onError,
-        });
-        set(s.hadToken ? 'expired' : 'signed-out');
-      } catch (e) { set('unavailable', 'gis-failed'); }
-    };
-    if (window.google && window.google.accounts && window.google.accounts.oauth2) { ready(); return; }
-    let script = document.querySelector(`script[src="${GIS_SRC}"]`);
-    if (!script) {
-      script = document.createElement('script');
-      script.src = GIS_SRC;
-      script.async = true;
-      document.head.append(script);
+        const saved = JSON.parse(env.sGet(KEYS.token) || 'null');
+        if (saved && saved.t && saved.exp > env.now()) keep(saved.t, saved.exp);
+        else env.sDel(KEYS.token);
+      } catch (e) { env.sDel(KEYS.token); }
     }
-    script.addEventListener('load', ready, { once: true });
-    script.addEventListener('error', () => set('unavailable', 'gis-offline'), { once: true });
+    const err = s.error;
+    if (s.token) set('ok');
+    else set(known() ? 'expired' : 'signed-out', err);
+  }
+
+  function go(prompt) {
+    const state = randomState();
+    env.sSet(KEYS.state, state);
+    const h = env.hash();
+    env.sSet(KEYS.view, parseRedirect(h) ? '#/library' : (h || '#/library'));
+    if (prompt === 'none') env.sSet(KEYS.silent, JSON.stringify({ at: env.now() }));
+    else env.sDel(KEYS.silent);
+    const hint = prompt === 'select_account' ? '' : (env.lGet(KEYS.email) || '');
+    env.go(buildAuthUrl({ clientId, redirectUri, scope, state, loginHint: hint, prompt: prompt || '' }));
+    return true;
   }
 
   return {
     init,
     get status() { return s.status; },
     get error() { return s.error; },
-    /** Call ONLY from a tap (click handler) so the browser allows Google's window. */
+    /** True when this page load is Google sending the user back (successfully or not). */
+    get returned() { return s.returned; },
+    /** Goes to Google's sign-in page (the whole page; remini comes back to the same screen). */
     request({ chooseAccount = false } = {}) {
-      if (!s.client) return false;
-      const opts = { prompt: chooseAccount ? 'select_account' : '' };
-      if (s.hint && !chooseAccount) opts.login_hint = s.hint;
-      s.client.requestAccessToken(opts);
-      return true;
+      if (s.status === 'unavailable') return false;
+      return go(chooseAccount ? 'select_account' : '');
     },
-    setHint(email) { s.hint = email || ''; },
-    markReturning() { s.hadToken = true; if (s.status === 'signed-out') set('expired'); },
+    /** If the sign-in ran out but this device has signed in before, ask Google quietly (no screens).
+     *  Returns true when the page is on its way to Google. */
+    trySilent() {
+      if (s.token || s.status === 'unavailable' || !known() || !env.online() || s.returned) return false;
+      try {
+        const last = JSON.parse(env.sGet(KEYS.silent) || 'null');
+        if (last && env.now() - last.at < SILENT_GAP_MS) return false;
+      } catch (e) { /* try again */ }
+      return go('none');
+    },
+    /** Remembers the home account (from the photo list) so Google can skip asking which account. */
+    rememberEmail(email) { if (email && email.includes('@')) env.lSet(KEYS.email, email); },
     token() {
-      if (s.token && Date.now() < s.expiresAt) return s.token;
+      if (s.token && env.now() < s.expiresAt) return s.token;
       if (s.token) expire();
       return null;
     },
-    invalidate() { if (s.token) { s.token = null; clearTimeout(s.timer); set('expired'); } },
+    invalidate() { if (s.token) { drop(); set('expired'); } },
     signOut() {
       const t = s.token;
-      s.token = null;
-      s.hadToken = false;
-      clearTimeout(s.timer);
-      try { if (t && window.google) window.google.accounts.oauth2.revoke(t, () => {}); } catch (e) { /* ignore */ }
-      set(s.client ? 'signed-out' : s.status);
+      drop();
+      env.lDel(KEYS.email);
+      env.sDel(KEYS.silent);
+      if (t) env.revoke(t);
+      set('signed-out');
     },
   };
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/** Read-only Drive calls with the in-memory token. */
+/** Read-only Drive calls with the current access token. */
 export function driveApi(auth, catalogName) {
   async function call(url, { signal, as = 'json' } = {}) {
     for (let attempt = 0; ; attempt++) {
